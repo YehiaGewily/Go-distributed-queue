@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="2">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Queue Dashboard</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            text-align: center;
+            background-color: #2d2d2d;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            width: 400px;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            font-weight: 300;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-bottom: 30px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background-color: #3d3d3d;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 3em;
+            font-weight: bold;
+            color: #4CAF50;
+            display: block;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .footer {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🚀 Task Monitor</h1>
+
+        <div class="status-badge" style="background-color: {{.StatusBgColor}}; color: {{.StatusColor}};">
+            ● {{.Status}}
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span class="stat-value">{{.PendingCount}}</span>
+                <span class="stat-label">Pending</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value" style="color: #2196F3;">{{.ProcessingCount}}</span>
+                <span class="stat-label">Processing</span>
+            </div>
+        </div>
+
+        <div class="footer">
+            Last Updated: {{.LastUpdated}}<br>
+            Auto-refreshing every 2s
+        </div>
+    </div>
+</body>
+
+</html>

@@ -17,6 +17,7 @@ var indexHTML string
 type StatsResponse struct {
 	Pending    int64 `json:"pending"`
 	Processing int64 `json:"processing"`
+	DeadLetter int64 `json:"dead_letter"`
 }
 
 func main() {
@@ -50,10 +51,17 @@ func main() {
 			processing = 0
 		}
 
+		deadLetter, err := client.LLen(ctx, queue.QueueDeadLetter).Result()
+		if err != nil {
+			log.Printf("Error fetching dead letter: %v", err)
+			deadLetter = 0
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(StatsResponse{
 			Pending:    pending,
 			Processing: processing,
+			DeadLetter: deadLetter,
 		})
 	})
 

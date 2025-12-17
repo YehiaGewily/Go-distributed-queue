@@ -14,4 +14,5 @@ func NewClient(addr string) *redis.Client {
 const (
 	QueuePending    = "tasks:pending"
 	QueueProcessing = "tasks:processing"
+	QueueDeadLetter = "tasks:dead_letter"
 )

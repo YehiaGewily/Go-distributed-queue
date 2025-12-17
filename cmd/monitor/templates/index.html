@@ -45,7 +45,7 @@
 
         .stats-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr;
             gap: 20px;
             margin-bottom: 30px;
         }
@@ -95,6 +95,10 @@
                 <span class="stat-value" style="color: #2196F3;" id="processing">0</span>
                 <span class="stat-label">Processing</span>
             </div>
+            <div class="stat-card">
+                <span class="stat-value" style="color: #ff4444;" id="dead-letter">0</span>
+                <span class="stat-label">Failed Jobs</span>
+            </div>
         </div>
 
         <div class="footer">
@@ -112,6 +116,7 @@
                 // Update numbers with animation (simple text replacement for now, smooth enough)
                 document.getElementById('pending').textContent = data.pending;
                 document.getElementById('processing').textContent = data.processing;
+                document.getElementById('dead-letter').textContent = data.dead_letter;
 
                 // Update status (simple logic for now)
                 const statusBadge = document.getElementById('status-badge');

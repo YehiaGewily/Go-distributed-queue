@@ -9,7 +9,7 @@
 
 Designed to handle concurrent workloads with zero data loss, ensuring robustness in distributed environments through atomic state transitions and graceful lifecycle management.
 
-## 🏗 Architecture
+## Architecture
 
 The system decouples task ingestion from processing using a persistent Redis layer, managed by a scalable pool of concurrent workers.
 
@@ -29,51 +29,69 @@ flowchart LR
     Redis <--> |Atomic BRPopLPush| W3
 ```
 
-## ⚙️ Key Engineering Concepts
+## Key Engineering Concepts
 
-### 🛡 Reliable Queue Pattern (Atomic RPOPLPUSH)
+### Reliable Queue Pattern (Atomic RPOPLPUSH)
 Implements the **Reliable Queue Pattern** to guarantee **at-least-once processing**.
 - Tasks are atomically moved from `tasks:pending` to `tasks:processing` using `BRPopLPush`.
 - This ensures that if a worker crashes mid-execution, the task remains in the `processing` list and is not lost, adhering to strict data integrity requirements.
 
-### ⚡ Concurrency & Parallelism
+### Concurrency & Parallelism
 Leverages Go's scheduler and efficient goroutines to maximize throughput.
 - **Worker Pools**: Spawns multiple concurrent processors (default: 5) managed via `sync.WaitGroup`.
 - **Non-blocking I/O**: Efficiently handles idle waiting on Redis connections without consuming OS threads.
 
-### 🛑 Graceful Shutdowns
+### Graceful Shutdowns
 Implements robust signal handling (`SIGINT`, `SIGTERM`) using `os/signal` and context cancellation.
 - Ensures all in-flight tasks complete execution before the process terminates.
 - Prevents data corruption and "half-processed" states during deployments or scaling events.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose
+- go 1.23+
 
 ### 1. Start the System
-Initialize the Redis infrastructure and the Producer API service.
+Initialize the Redis infrastructure.
 ```bash
-docker-compose up -d --build
+docker-compose up -d redis
 ```
-*Services available:*
-- **Producer API**: `http://localhost:8080`
-- **Monitor Dashboard**: `http://localhost:8081`
-- **Redis**: `localhost:6379`
 
-### 2. Start the Worker Pool
-Run the worker service locally to observe logs in real-time.
+### 2. Start the Services
+Run each service in a separate terminal:
+
+**Producer API (Port 8085)**
+```bash
+go run cmd/producer/main.go
+```
+
+**Monitor Dashboard (Port 8082)**
+```bash
+go run cmd/monitor/main.go
+```
+
+**Worker Pool**
 ```bash
 go run cmd/worker/main.go
-# Output: 👷 Starting 5 workers. Press Ctrl+C to stop.
 ```
 
-### 3. Dispatch a Task
-Send a JSON payload to the REST API.
+*Services available:*
+- **Producer API**: `http://localhost:8085`
+- **Monitor Dashboard**: `http://localhost:8082`
+- **Redis**: `localhost:6379`
+
+### 3. Dispatch Tasks
+You can send tasks manually or run the stress test script.
+
+**Using the Stress Test Script:**
+```bash
+go run scripts/stress_load/main.go
+```
 
 **Using cURL:**
 ```bash
-curl -X POST http://localhost:8080/task \
+curl -X POST http://localhost:8085/task \
      -H "Content-Type: application/json" \
      -d '{"type": "email-notification", "payload": "user@example.com"}'
 ```
@@ -86,7 +104,7 @@ curl -X POST http://localhost:8080/task \
 }
 ```
 
-## 📚 Future Improvements
+## Future Improvements
 - **Dead Letter Queue (DLQ)**: For processing repeatedly failed tasks.
 - **Metrics Export**: Prometheus integration for queue depth and latency monitoring.
 - **Dynamic Scaling**: Horizontal Pod Autoscaling (HPA) based on queue lag.

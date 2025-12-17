@@ -34,26 +34,32 @@ flowchart LR
 ### Reliable Queue Pattern (Atomic RPOPLPUSH)
 Implements the **Reliable Queue Pattern** to guarantee **at-least-once processing**.
 - Tasks are atomically moved from `tasks:pending` to `tasks:processing` using `BRPopLPush`.
-- This ensures that if a worker crashes mid-execution, the task remains in the `processing` list and is not lost, adhering to strict data integrity requirements.
+- This ensures that if a worker crashes mid-execution, the task remains in the `processing` list and is not lost.
+
+### Fault Tolerance & Retry Logic
+- **Automatic Retries**: Failed tasks are retried up to 3 times with exponential backoff.
+- **Dead Letter Queue (DLQ)**: Tasks that exceed the retry limit are moved to a `dead_letter` queue for manual inspection, preventing poison pills from clogging the system.
+
+### Real-Time Monitoring
+- **Live Dashboard**: A web-based dashboard provides real-time visibility into queue depths (Pending, Processing, Dead Letter).
+- **JSON API**: Exposes metrics via a simple JSON endpoint for external tools.
 
 ### Concurrency & Parallelism
 Leverages Go's scheduler and efficient goroutines to maximize throughput.
-- **Worker Pools**: Spawns multiple concurrent processors (default: 5) managed via `sync.WaitGroup`.
-- **Non-blocking I/O**: Efficiently handles idle waiting on Redis connections without consuming OS threads.
+- **Worker Pools**: Spawns multiple concurrent processors managed via `sync.WaitGroup`.
+- **Non-blocking I/O**: Efficiently handles idle waiting on Redis connections.
 
 ### Graceful Shutdowns
-Implements robust signal handling (`SIGINT`, `SIGTERM`) using `os/signal` and context cancellation.
-- Ensures all in-flight tasks complete execution before the process terminates.
-- Prevents data corruption and "half-processed" states during deployments or scaling events.
+Implements robust signal handling (`SIGINT`, `SIGTERM`) using `os/signal` and context cancellation to ensure all in-flight tasks complete execution before termination.
 
 ## Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose
-- go 1.23+
+- Go 1.23+
 
-### 1. Start the System
-Initialize the Redis infrastructure.
+### 1. Start the Infrastructure
+Initialize the Redis instance.
 ```bash
 docker-compose up -d redis
 ```
@@ -64,27 +70,26 @@ Run each service in a separate terminal:
 **Producer API (Port 8085)**
 ```bash
 go run cmd/producer/main.go
+# Starts HTTP server on :8085
 ```
 
 **Monitor Dashboard (Port 8082)**
 ```bash
 go run cmd/monitor/main.go
+# Dashboard available at http://localhost:8082
 ```
 
 **Worker Pool**
 ```bash
 go run cmd/worker/main.go
+# Starts the worker node
 ```
 
-*Services available:*
-- **Producer API**: `http://localhost:8085`
-- **Monitor Dashboard**: `http://localhost:8082`
-- **Redis**: `localhost:6379`
-
 ### 3. Dispatch Tasks
-You can send tasks manually or run the stress test script.
+You can send tasks manually or run the stress test script to simulate load.
 
 **Using the Stress Test Script:**
+This script sends a burst of concurrent requests to the producer.
 ```bash
 go run scripts/stress_load/main.go
 ```
@@ -104,7 +109,17 @@ curl -X POST http://localhost:8085/task \
 }
 ```
 
+## API Endpoints
+
+### Producer (`:8085`)
+- `POST /task`: Enqueues a new task.
+    - Body: `{"type": "string", "payload": "any"}`
+    - Returns: `202 Accepted` with Task ID.
+
+### Monitor (`:8082`)
+- `GET /`: HTML Dashboard.
+- `GET /stats`: JSON metrics (`pending`, `processing`, `dead_letter` counts).
+
 ## Future Improvements
-- **Dead Letter Queue (DLQ)**: For processing repeatedly failed tasks.
 - **Metrics Export**: Prometheus integration for queue depth and latency monitoring.
 - **Dynamic Scaling**: Horizontal Pod Autoscaling (HPA) based on queue lag.

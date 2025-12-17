@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="refresh" content="2">
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Go Queue Dashboard</title>
     <style>
@@ -82,26 +82,68 @@
     <div class="container">
         <h1>🚀 Task Monitor</h1>
 
-        <div class="status-badge" style="background-color: {{.StatusBgColor}}; color: {{.StatusColor}};">
-            ● {{.Status}}
+        <div class="status-badge" id="status-badge" style="background-color: rgba(76, 175, 80, 0.2); color: #4CAF50;">
+            ● <span id="status-text">System Healthy</span>
         </div>
 
         <div class="stats-grid">
             <div class="stat-card">
-                <span class="stat-value">{{.PendingCount}}</span>
+                <span class="stat-value" id="pending">0</span>
                 <span class="stat-label">Pending</span>
             </div>
             <div class="stat-card">
-                <span class="stat-value" style="color: #2196F3;">{{.ProcessingCount}}</span>
+                <span class="stat-value" style="color: #2196F3;" id="processing">0</span>
                 <span class="stat-label">Processing</span>
             </div>
         </div>
 
         <div class="footer">
-            Last Updated: {{.LastUpdated}}<br>
-            Auto-refreshing every 2s
+            Last Updated: <span id="last-updated">--:--:--</span><br>
+            Live Updates (1s)
         </div>
     </div>
+
+    <script>
+        const updateStats = async () => {
+            try {
+                const response = await fetch('/stats');
+                const data = await response.json();
+
+                // Update numbers with animation (simple text replacement for now, smooth enough)
+                document.getElementById('pending').textContent = data.pending;
+                document.getElementById('processing').textContent = data.processing;
+
+                // Update status (simple logic for now)
+                const statusBadge = document.getElementById('status-badge');
+                const statusText = document.getElementById('status-text');
+
+                // Assuming healthy if fetch works, but we could add more logic
+                statusBadge.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
+                statusBadge.style.color = '#4CAF50';
+                statusText.textContent = 'System Healthy';
+
+                // Update generic timestamp
+                const now = new Date();
+                document.getElementById('last-updated').textContent = now.toLocaleTimeString();
+
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+
+                const statusBadge = document.getElementById('status-badge');
+                const statusText = document.getElementById('status-text');
+
+                statusBadge.style.backgroundColor = 'rgba(244, 67, 54, 0.2)';
+                statusBadge.style.color = '#F44336';
+                statusText.textContent = 'Connection Error';
+            }
+        };
+
+        // Initial fetch
+        updateStats();
+
+        // Poll every 1 second
+        setInterval(updateStats, 1000);
+    </script>
 </body>
 
 </html>

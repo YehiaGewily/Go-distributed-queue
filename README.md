@@ -58,6 +58,7 @@ docker-compose up -d --build
 ```
 *Services available:*
 - **Producer API**: `http://localhost:8080`
+- **Monitor Dashboard**: `http://localhost:8081`
 - **Redis**: `localhost:6379`
 
 ### 2. Start the Worker Pool

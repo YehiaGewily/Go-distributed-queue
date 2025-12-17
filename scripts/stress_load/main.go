@@ -11,11 +11,11 @@ import (
 )
 
 func main() {
-	url := "http://localhost:8080/task"
+	url := "http://localhost:8085/task"
 	count := 50
 	types := []string{"Email", "Resize", "Export"}
 
-	fmt.Printf("🔥 Starting stress test: Sending %d requests to %s...\n", count, url)
+	fmt.Printf("Starting stress test: Sending %d requests to %s...\n", count, url)
 
 	var wg sync.WaitGroup
 	start := time.Now()

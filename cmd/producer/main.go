@@ -22,7 +22,7 @@ func main() {
 	client := queue.NewClient(addr)
 	defer client.Close()
 
-	log.Printf("🚀 Producer API starting on :8080 (Redis: %s)", addr)
+	log.Printf("🚀 Producer API starting on :8085 (Redis: %s)", addr)
 
 	http.HandleFunc("/task", func(w http.ResponseWriter, r *http.Request) {
 		// Structured Logging: Request Received
@@ -77,7 +77,7 @@ func main() {
 		})
 	})
 
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe(":8085", nil); err != nil {
 		log.Fatal(err)
 	}
 }

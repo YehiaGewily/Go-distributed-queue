@@ -1,0 +1,54 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"math/rand"
+	"net/http"
+	"sync"
+	"time"
+)
+
+type TaskPayload struct {
+	Type string `json:"type"`
+}
+
+func main() {
+	var wg sync.WaitGroup
+	numRequests := 50
+	url := "http://localhost:8085/task"
+	taskTypes := []string{"Email", "Resize", "Export"}
+
+	fmt.Printf("🚀 Starting stress test: %d concurrent requests...\n", numRequests)
+	startTime := time.Now()
+
+	for i := 0; i < numRequests; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+
+			// Pick a random task type
+			taskType := taskTypes[rand.Intn(len(taskTypes))]
+			payload := TaskPayload{Type: taskType}
+			jsonPayload, _ := json.Marshal(payload)
+
+			resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+			if err != nil {
+				fmt.Printf("[Req %d] ❌ Error: %v\n", id, err)
+				return
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusAccepted {
+				fmt.Printf("[Req %d] ✅ Sent %s\n", id, taskType)
+			} else {
+				fmt.Printf("[Req %d] ⚠️ Status: %s\n", id, resp.Status)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	duration := time.Since(startTime)
+	fmt.Printf("\n🏁 Done! Sent %d requests in %v\n", numRequests, duration)
+}

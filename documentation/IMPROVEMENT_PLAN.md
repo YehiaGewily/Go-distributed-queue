@@ -4,6 +4,201 @@ A phased roadmap to move the project from "working queue demo" to "production-gr
 
 ---
 
+## Target Architecture
+
+### Current State
+
+The system today is a straightforward producer → Redis → worker pipeline with a monitoring dashboard. There is no crash recovery, no lease mechanism, and IDs are generated from nanosecond timestamps.
+
+```mermaid
+flowchart TB
+    subgraph Clients
+        C1["Client / cURL"]
+    end
+
+    subgraph "Producer :8085"
+        API["POST /task\n(nanosecond ID generation)"]
+    end
+
+    subgraph "Redis (Single Instance)"
+        P["tasks:pending\n(List)"]
+        PR["tasks:processing\n(List)"]
+        DLQ["tasks:dead_letter\n(List)"]
+    end
+
+    subgraph "Worker (Single Process)"
+        WL["Main Loop\n(BRPopLPush — deprecated)"]
+        RT["Retry Logic\n(in-process, ≤3 attempts)"]
+    end
+
+    subgraph "Monitor :8082"
+        DASH["HTML Dashboard"]
+        STATS["GET /stats\n(JSON)"]
+    end
+
+    C1 -->|"POST JSON"| API
+    API -->|"LPUSH"| P
+    P -->|"BRPopLPush\n(atomic move)"| WL
+    WL -->|"success → LREM"| PR
+    WL -->|"failure"| RT
+    RT -->|"retry ≤ 3 → RPUSH"| P
+    RT -->|"retry > 3 → LPUSH"| DLQ
+    WL -.->|"placed during pop"| PR
+    DASH -.->|"polls"| STATS
+    STATS -.->|"LLEN"| P
+    STATS -.->|"LLEN"| PR
+    STATS -.->|"LLEN"| DLQ
+
+    style P fill:#2563eb,color:#fff
+    style PR fill:#d97706,color:#fff
+    style DLQ fill:#dc2626,color:#fff
+    style API fill:#059669,color:#fff
+    style WL fill:#7c3aed,color:#fff
+```
+
+### Target State (After All Phases)
+
+The improved architecture adds crash recovery via lease-based reaping, delayed/scheduled task support, priority queues, Prometheus observability, structured logging, API hardening, and idempotency guarantees.
+
+```mermaid
+flowchart TB
+    subgraph Clients
+        C1["Client / cURL"]
+        C2["Batch Client"]
+    end
+
+    subgraph "Producer :8085"
+        AUTH["Auth Middleware\n(Bearer Token)"]
+        RL["Rate Limiter\n(per-IP, 100 req/s)"]
+        VAL["Input Validation\n(body size ≤ 64KB)"]
+        EP1["POST /task\n(ULID generation)"]
+        EP2["POST /tasks\n(Batch — Redis Pipeline)"]
+        PMET["/metrics\n(Prometheus)"]
+    end
+
+    subgraph "Redis (AOF Persistence)"
+        PH["tasks:pending:high\n(List)"]
+        PD["tasks:pending:default\n(List)"]
+        PL["tasks:pending:low\n(List)"]
+        PR["tasks:processing\n(List)"]
+        DLQ["tasks:dead_letter\n(List)"]
+        DEL["tasks:delayed\n(Sorted Set — score = unix ts)"]
+        LEASE["task:lease:{id}\n(Key — TTL 30s)"]
+        IDEMP["task:done:{key}\n(Key — TTL 24h)"]
+    end
+
+    subgraph "Worker Cluster"
+        direction TB
+        subgraph "Worker N (each instance)"
+            WL["Poll Loop\n(BLMOVE — high → default → low)"]
+            LR["Lease Refresh\n(goroutine, every 10s)"]
+            IG["Idempotency Guard\n(SETNX check)"]
+            HANDLER["Task Handler"]
+            SLOG["slog JSON Logger"]
+            OTEL["OTel Span\n(traceparent propagation)"]
+        end
+        REAPER["Reaper Goroutine\n(scans processing every 5s)"]
+        DISP["Delayed Dispatcher\n(polls delayed every 1s)"]
+        WMET["/metrics\n(Prometheus)"]
+    end
+
+    subgraph "Monitor :8082"
+        DASH["HTML Dashboard"]
+        STATS["GET /stats\n(JSON)"]
+        MMET["/metrics\n(Prometheus)"]
+    end
+
+    subgraph "Observability Stack"
+        PROM["Prometheus"]
+        GRAF["Grafana Dashboard"]
+        JAEG["Jaeger / OTel Collector"]
+    end
+
+    %% Client → Producer
+    C1 -->|"POST JSON"| AUTH
+    C2 -->|"POST JSON array"| AUTH
+    AUTH --> RL --> VAL
+    VAL --> EP1
+    VAL --> EP2
+
+    %% Producer → Redis
+    EP1 -->|"LPUSH"| PD
+    EP1 -->|"LPUSH (priority=high)"| PH
+    EP1 -->|"LPUSH (priority=low)"| PL
+    EP1 -->|"ZADD (execute_at)"| DEL
+    EP2 -->|"Pipeline LPUSH"| PD
+
+    %% Delayed Dispatcher
+    DISP -->|"ZRANGEBYSCORE + LPUSH\n(Lua atomic)"| DEL
+    DISP -->|"moves due tasks"| PD
+
+    %% Worker → Redis
+    WL -->|"BLMOVE\n(priority order)"| PH
+    WL -->|"BLMOVE"| PD
+    WL -->|"BLMOVE"| PL
+    WL -->|"SET EX 30"| LEASE
+    LR -->|"refresh TTL"| LEASE
+    IG -->|"SETNX"| IDEMP
+    WL --> IG --> HANDLER
+    HANDLER -->|"success → LREM"| PR
+    HANDLER -->|"failure ≤ 3 → ZADD\n(now + backoff)"| DEL
+    HANDLER -->|"failure > 3 → LPUSH"| DLQ
+
+    %% Reaper
+    REAPER -->|"scan"| PR
+    REAPER -->|"check lease expired?"| LEASE
+    REAPER -->|"reclaim → LREM + LPUSH"| PD
+
+    %% Monitor
+    DASH -.->|"polls"| STATS
+    STATS -.->|"LLEN × queues"| PH
+    STATS -.->|"LLEN"| PR
+    STATS -.->|"LLEN"| DLQ
+    STATS -.->|"ZCARD"| DEL
+
+    %% Observability
+    PMET -.-> PROM
+    WMET -.-> PROM
+    MMET -.-> PROM
+    PROM -.-> GRAF
+    OTEL -.->|"traces"| JAEG
+    SLOG -.->|"JSON logs"| JAEG
+
+    style PH fill:#dc2626,color:#fff
+    style PD fill:#2563eb,color:#fff
+    style PL fill:#6b7280,color:#fff
+    style PR fill:#d97706,color:#fff
+    style DLQ fill:#991b1b,color:#fff
+    style DEL fill:#7c3aed,color:#fff
+    style LEASE fill:#059669,color:#fff
+    style IDEMP fill:#059669,color:#fff
+    style AUTH fill:#b91c1c,color:#fff
+    style REAPER fill:#ea580c,color:#fff
+    style DISP fill:#7c3aed,color:#fff
+    style PROM fill:#e85d04,color:#fff
+    style GRAF fill:#f59e0b,color:#000
+    style JAEG fill:#0ea5e9,color:#fff
+```
+
+### Key Architectural Changes Summary
+
+| Area | Current | Target | Phase |
+|---|---|---|---|
+| **Crash Recovery** | None — orphaned tasks lost | Lease-based reaper reclaims within ≤60s | 1.1 |
+| **Queue Primitive** | `BRPopLPush` (deprecated) | `BLMOVE` | 1.2 |
+| **ID Generation** | `time.Now().UnixNano()` (collision risk) | ULID (lexicographic, unique) | 1.3 |
+| **Idempotency** | Undocumented | `SETNX` guard with 24h TTL | 1.4 |
+| **Scheduling** | Not supported | Sorted set + dispatcher goroutine | 2.1 |
+| **Priority** | Single FIFO | Three-tier priority queues | 2.2 |
+| **Batch Ingestion** | 1 HTTP req per task | `POST /tasks` with Redis pipeline | 2.3 |
+| **Metrics** | Dashboard only | Prometheus `/metrics` + Grafana | 3.1 |
+| **Logging** | `log.Printf` | `slog` JSON structured logging | 3.2 |
+| **Tracing** | None | OpenTelemetry `traceparent` propagation | 3.3 |
+| **API Security** | Open | Bearer token + rate limit + body cap | 4.1 |
+| **Redis Security** | No auth | Password required in non-dev mode | 4.2 |
+
+---
+
 ## Phase 1 — Correctness (Critical)
 
 These are the items where the current code does *not* deliver what the README claims. Ship these first.

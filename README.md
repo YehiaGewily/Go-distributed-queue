@@ -3,7 +3,7 @@
 ![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)
 ![Redis](https://img.shields.io/badge/Redis-7.0+-DC382D?style=flat&logo=redis)
 ![Docker](https://img.shields.io/badge/Docker-v24+-2496ED?style=flat&logo=docker)
-![REST API](https://img.shields.io/badge/API-REST-4CAF50?style=flat)
+![REST API](https://img.shields.io/badge/API-REST-4CAF50?style=flat)  
 
 **A high-throughput, fault-tolerant distributed task processing system implementing the Reliable Queue Pattern.**
 
@@ -123,3 +123,4 @@ curl -X POST http://localhost:8085/task \
 ## Future Improvements
 - **Metrics Export**: Prometheus integration for queue depth and latency monitoring.
 - **Dynamic Scaling**: Horizontal Pod Autoscaling (HPA) based on queue lag.
+

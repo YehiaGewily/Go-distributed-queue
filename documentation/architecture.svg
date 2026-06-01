@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 520" font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <defs>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="112%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 3.5 L 0 7 z" fill="#8b949e"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 3.5 L 0 7 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 3.5 L 0 7 z" fill="#f85149"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 3.5 L 0 7 z" fill="#a371f7"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 3.5 L 0 7 z" fill="#d29922"/>
+    </marker>
+    <linearGradient id="redisBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2d1b1b"/>
+      <stop offset="100%" stop-color="#1a1010"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1100" height="520" rx="12" fill="#0d1117"/>
+  <rect x="1" y="1" width="1098" height="518" rx="12" fill="none" stroke="#30363d" stroke-width="1"/>
+
+  <!-- Title -->
+  <text x="550" y="36" text-anchor="middle" fill="#e6edf3" font-size="16" font-weight="600" letter-spacing="0.5">Go Distributed Queue — System Architecture</text>
+
+  <!-- ============ CLIENT ============ -->
+  <g filter="url(#shadow)">
+    <rect x="30" y="170" width="140" height="70" rx="10" fill="#0d2940" stroke="#1f6feb" stroke-width="1.5"/>
+    <text x="100" y="197" text-anchor="middle" fill="#58a6ff" font-size="11" font-weight="600">🌐</text>
+    <text x="100" y="215" text-anchor="middle" fill="#e6edf3" font-size="12" font-weight="600">Client</text>
+    <text x="100" y="230" text-anchor="middle" fill="#8b949e" font-size="10">External Service</text>
+  </g>
+
+  <!-- Arrow: Client → Producer -->
+  <line x1="170" y1="205" x2="238" y2="205" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="178" y="185" width="56" height="16" rx="3" fill="#0d1117"/>
+  <text x="206" y="196" text-anchor="middle" fill="#3fb950" font-size="9" font-weight="500">POST /task</text>
+
+  <!-- ============ PRODUCER ============ -->
+  <g filter="url(#shadow)">
+    <rect x="248" y="155" width="155" height="100" rx="10" fill="#06261a" stroke="#238636" stroke-width="1.5"/>
+    <text x="325" y="182" text-anchor="middle" fill="#3fb950" font-size="11" font-weight="700">REST API Producer</text>
+    <line x1="265" y1="192" x2="386" y2="192" stroke="#238636" stroke-width="0.5" opacity="0.5"/>
+    <text x="325" y="210" text-anchor="middle" fill="#8b949e" font-size="10">HTTP :8085</text>
+    <text x="325" y="226" text-anchor="middle" fill="#7d8590" font-size="9">JSON → Task</text>
+    <text x="325" y="242" text-anchor="middle" fill="#7d8590" font-size="9">ID Generation</text>
+  </g>
+
+  <!-- Arrow: Producer → Redis -->
+  <line x1="403" y1="205" x2="468" y2="205" stroke="#f85149" stroke-width="1.5" marker-end="url(#arrow-red)"/>
+  <rect x="410" y="185" width="56" height="16" rx="3" fill="#0d1117"/>
+  <text x="438" y="196" text-anchor="middle" fill="#f85149" font-size="9" font-weight="500">LPUSH</text>
+
+  <!-- ============ REDIS ============ -->
+  <g filter="url(#shadow)">
+    <!-- Redis cylinder body -->
+    <rect x="478" y="90" width="170" height="280" rx="10" fill="url(#redisBg)" stroke="#f85149" stroke-width="1.5"/>
+
+    <!-- Redis header -->
+    <text x="563" y="118" text-anchor="middle" fill="#f85149" font-size="13" font-weight="700">⬡ Redis Queue</text>
+    <line x1="495" y1="130" x2="631" y2="130" stroke="#f85149" stroke-width="0.5" opacity="0.4"/>
+
+    <!-- Pending queue -->
+    <rect x="498" y="145" width="130" height="42" rx="6" fill="#0d2059" stroke="#1f6feb" stroke-width="1"/>
+    <text x="563" y="164" text-anchor="middle" fill="#58a6ff" font-size="10" font-weight="600">tasks:pending</text>
+    <text x="563" y="178" text-anchor="middle" fill="#8b949e" font-size="9">LIST</text>
+
+    <!-- Processing queue -->
+    <rect x="498" y="198" width="130" height="42" rx="6" fill="#2b1d0e" stroke="#d29922" stroke-width="1"/>
+    <text x="563" y="217" text-anchor="middle" fill="#e3b341" font-size="10" font-weight="600">tasks:processing</text>
+    <text x="563" y="231" text-anchor="middle" fill="#8b949e" font-size="9">LIST</text>
+
+    <!-- Dead Letter queue -->
+    <rect x="498" y="251" width="130" height="42" rx="6" fill="#3d0c0c" stroke="#da3633" stroke-width="1"/>
+    <text x="563" y="270" text-anchor="middle" fill="#f85149" font-size="10" font-weight="600">tasks:dead_letter</text>
+    <text x="563" y="284" text-anchor="middle" fill="#8b949e" font-size="9">LIST</text>
+
+    <!-- Stats -->
+    <rect x="498" y="305" width="130" height="48" rx="6" fill="#0d1117" stroke="#30363d" stroke-width="0.5"/>
+    <text x="563" y="322" text-anchor="middle" fill="#8b949e" font-size="9">Persistence: AOF</text>
+    <text x="563" y="337" text-anchor="middle" fill="#8b949e" font-size="9">Port: 6379</text>
+    <text x="563" y="349" text-anchor="middle" fill="#7d8590" font-size="8">redis:alpine (Docker)</text>
+  </g>
+
+  <!-- Arrow: Redis → Workers (BLMOVE) -->
+  <line x1="648" y1="170" x2="730" y2="140" stroke="#a371f7" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+  <line x1="648" y1="205" x2="730" y2="205" stroke="#a371f7" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+  <line x1="648" y1="240" x2="730" y2="270" stroke="#a371f7" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+
+  <!-- Label for BLMOVE -->
+  <rect x="656" y="185" width="70" height="16" rx="3" fill="#0d1117"/>
+  <text x="691" y="196" text-anchor="middle" fill="#a371f7" font-size="9" font-weight="500">BRPopLPush</text>
+
+  <!-- ============ WORKER CLUSTER ============ -->
+  <g filter="url(#shadow)">
+    <rect x="740" y="80" width="160" height="290" rx="10" fill="#1a0e2e" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="820" y="108" text-anchor="middle" fill="#a371f7" font-size="12" font-weight="700">Worker Cluster</text>
+    <line x1="757" y1="118" x2="883" y2="118" stroke="#8b5cf6" stroke-width="0.5" opacity="0.4"/>
+
+    <!-- Worker 1 -->
+    <rect x="760" y="128" width="120" height="38" rx="6" fill="#21143a" stroke="#6e40c9" stroke-width="1"/>
+    <text x="820" y="145" text-anchor="middle" fill="#d2a8ff" font-size="10" font-weight="600">👷 Worker 1</text>
+    <text x="820" y="158" text-anchor="middle" fill="#8b949e" font-size="8">goroutine</text>
+
+    <!-- Worker 2 -->
+    <rect x="760" y="176" width="120" height="38" rx="6" fill="#21143a" stroke="#6e40c9" stroke-width="1"/>
+    <text x="820" y="193" text-anchor="middle" fill="#d2a8ff" font-size="10" font-weight="600">👷 Worker 2</text>
+    <text x="820" y="206" text-anchor="middle" fill="#8b949e" font-size="8">goroutine</text>
+
+    <!-- Worker N -->
+    <rect x="760" y="224" width="120" height="38" rx="6" fill="#21143a" stroke="#6e40c9" stroke-width="1"/>
+    <text x="820" y="241" text-anchor="middle" fill="#d2a8ff" font-size="10" font-weight="600">👷 Worker N</text>
+    <text x="820" y="254" text-anchor="middle" fill="#8b949e" font-size="8">goroutine</text>
+
+    <!-- Worker features -->
+    <line x1="757" y1="272" x2="883" y2="272" stroke="#6e40c9" stroke-width="0.5" opacity="0.3"/>
+    <text x="820" y="290" text-anchor="middle" fill="#7d8590" font-size="9">Retry ≤ 3 × Exp Backoff</text>
+    <text x="820" y="305" text-anchor="middle" fill="#7d8590" font-size="9">Graceful Shutdown</text>
+    <text x="820" y="320" text-anchor="middle" fill="#7d8590" font-size="9">25% Simulated Failure</text>
+
+    <!-- Concurrent badge -->
+    <rect x="770" y="333" width="100" height="20" rx="10" fill="#238636" opacity="0.2"/>
+    <text x="820" y="347" text-anchor="middle" fill="#3fb950" font-size="9" font-weight="600">⚡ Concurrent</text>
+  </g>
+
+  <!-- Retry arrow (Worker → Redis pending) -->
+  <path d="M 820 360 L 820 390 Q 820 410 800 410 L 563 410 Q 543 410 543 390 L 543 300" fill="none" stroke="#d29922" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#arrow-amber)"/>
+  <rect x="645" y="400" width="110" height="16" rx="3" fill="#0d1117"/>
+  <text x="700" y="411" text-anchor="middle" fill="#d29922" font-size="9" font-weight="500">🔄 Retry / ☠️ DLQ</text>
+
+  <!-- Success arrow -->
+  <path d="M 900 205 L 940 205" fill="none" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <g filter="url(#shadow)">
+    <rect x="950" y="185" width="110" height="40" rx="8" fill="#06261a" stroke="#238636" stroke-width="1"/>
+    <text x="1005" y="205" text-anchor="middle" fill="#3fb950" font-size="10" font-weight="600">✅ Task Done</text>
+    <text x="1005" y="218" text-anchor="middle" fill="#7d8590" font-size="8">LREM processing</text>
+  </g>
+
+  <!-- ============ MONITOR ============ -->
+  <g filter="url(#shadow)">
+    <rect x="248" y="390" width="155" height="95" rx="10" fill="#261c03" stroke="#d29922" stroke-width="1.5"/>
+    <text x="325" y="417" text-anchor="middle" fill="#e3b341" font-size="11" font-weight="700">📊 Monitor Dashboard</text>
+    <line x1="265" y1="427" x2="386" y2="427" stroke="#d29922" stroke-width="0.5" opacity="0.4"/>
+    <text x="325" y="444" text-anchor="middle" fill="#8b949e" font-size="10">HTTP :8082</text>
+    <text x="325" y="460" text-anchor="middle" fill="#7d8590" font-size="9">GET / → HTML Dashboard</text>
+    <text x="325" y="475" text-anchor="middle" fill="#7d8590" font-size="9">GET /stats → JSON API</text>
+  </g>
+
+  <!-- Arrow: Monitor → Redis (dashed, polling) -->
+  <path d="M 403 430 L 440 430 Q 460 430 460 380 L 460 272 Q 460 252 478 252" fill="none" stroke="#d29922" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#arrow-amber)"/>
+  <rect x="410" y="340" width="44" height="16" rx="3" fill="#0d1117"/>
+  <text x="432" y="351" text-anchor="middle" fill="#d29922" font-size="9" font-weight="500">LLEN</text>
+
+  <!-- ============ LEGEND ============ -->
+  <rect x="930" y="400" width="145" height="100" rx="8" fill="#161b22" stroke="#30363d" stroke-width="0.5"/>
+  <text x="1002" y="420" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">Legend</text>
+  <line x1="945" y1="430" x2="1060" y2="430" stroke="#30363d" stroke-width="0.5"/>
+  <line x1="945" y1="445" x2="970" y2="445" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="978" y="449" fill="#8b949e" font-size="9">HTTP / Success</text>
+  <line x1="945" y1="462" x2="970" y2="462" stroke="#a371f7" stroke-width="1.5"/>
+  <text x="978" y="466" fill="#8b949e" font-size="9">Queue Operation</text>
+  <line x1="945" y1="479" x2="970" y2="479" stroke="#d29922" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="978" y="483" fill="#8b949e" font-size="9">Polling / Retry</text>
+</svg>

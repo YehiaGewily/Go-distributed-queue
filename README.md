@@ -13,21 +13,9 @@ Designed to handle concurrent workloads with zero data loss, ensuring robustness
 
 The system decouples task ingestion from processing using a persistent Redis layer, managed by a scalable pool of concurrent workers.
 
-```mermaid
-flowchart LR
-    Client[Client / External Service] --> |POST /task| API[REST API Producer]
-    API --> |LPUSH JSON| Redis[(Redis Queue)]
-    
-    subgraph "Worker Cluster"
-        W1[Worker 1]
-        W2[Worker 2]
-        W3[Worker N]
-    end
-    
-    Redis <--> |Atomic BRPopLPush| W1
-    Redis <--> |Atomic BRPopLPush| W2
-    Redis <--> |Atomic BRPopLPush| W3
-```
+<p align="center">
+  <img src="documentation/architecture.svg" alt="System Architecture Diagram" width="900"/>
+</p>
 
 ## Key Engineering Concepts
 

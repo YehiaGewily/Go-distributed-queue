@@ -39,7 +39,7 @@ jobs:
           cache: true
 
       - name: Run Unit Tests
-        run: go test -race -count=1 ./...
+        run: make test-race
 
   test-integration:
     name: Integration Tests

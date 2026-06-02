@@ -1,4 +1,4 @@
-.PHONY: up down test test-integration test-chaos stress lint build
+.PHONY: up down test test-race test-integration test-chaos stress lint build
 
 up:
 	docker compose up -d --build
@@ -7,6 +7,9 @@ down:
 	docker compose down -v
 
 test:
+	go test ./... -count=1
+
+test-race:
 	go test -race ./... -count=1
 
 test-integration:

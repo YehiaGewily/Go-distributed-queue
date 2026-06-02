@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"go-queue/internal/queue"
 )
 
 func main() {
@@ -27,6 +29,7 @@ func main() {
 
 			taskType := types[rand.Intn(len(types))]
 			payload := map[string]string{
+				"id":      queue.NewID(),
 				"type":    taskType,
 				"payload": fmt.Sprintf("stress-test-data-%d", id),
 			}

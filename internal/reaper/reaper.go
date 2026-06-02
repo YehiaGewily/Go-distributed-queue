@@ -105,10 +105,11 @@ func (r *Reaper) sweep(ctx context.Context) {
 		}
 
 		leaseKey := LeaseKey(task.ID)
+		pendingQueue := queue.GetPendingQueue(task.Priority)
 
 		reclaimed, err := reclaimScript.Run(
 			ctx, r.client,
-			[]string{leaseKey, queue.QueueProcessing, queue.QueuePending},
+			[]string{leaseKey, queue.QueueProcessing, pendingQueue},
 			taskData,
 		).Int64()
 		if err != nil {

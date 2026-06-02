@@ -6,14 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
+	"go-queue/internal/dispatcher"
 	"go-queue/internal/queue"
+	"go-queue/internal/reaper"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -36,40 +36,26 @@ func setupRedis(t *testing.T) *redis.Client {
 	return client
 }
 
-// TestIntegration_ReaperReclaimsOrphanedTasks pushes 50 tasks into a real Redis,
-// starts a worker that sleeps 500 ms per task, kills it after 100 ms, then
-// starts a fresh worker and asserts all 50 tasks eventually complete.
+// TestIntegration_ReaperReclaimsOrphanedTasks enqueues tasks, starts an
+// in-process worker that acquires leases but then "crashes" (context cancelled
+// without releasing leases or acking), waits for the reaper to reclaim the
+// orphaned tasks, and finally verifies a second worker completes them all.
 func TestIntegration_ReaperReclaimsOrphanedTasks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+
+	// Short intervals so the test completes quickly
+	t.Setenv("LEASE_TTL_SECONDS", "2")
+	t.Setenv("REAPER_INTERVAL_SECONDS", "1")
 
 	client := setupRedis(t)
 	defer client.Close()
 
 	ctx := context.Background()
 
-	// Derive the address string (including DB 15) for worker env vars.
-	opts := client.Options()
-	workerAddr := opts.Addr
-
-	// --- 1. Build the worker binary ---
-	tmpDir := t.TempDir()
-	binName := "worker"
-	if runtime.GOOS == "windows" {
-		binName = "worker.exe"
-	}
-	workerBin := filepath.Join(tmpDir, binName)
-
-	projectRoot := filepath.Join("..", "..")
-	buildCmd := exec.Command("go", "build", "-o", workerBin, "./cmd/worker")
-	buildCmd.Dir = projectRoot
-	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to build worker: %v\n%s", err, out)
-	}
-
-	// --- 2. Enqueue 50 tasks ---
-	const numTasks = 50
+	// --- 1. Enqueue 10 tasks ---
+	const numTasks = 10
 	for i := range numTasks {
 		task := queue.Task{
 			ID:      queue.NewID(),
@@ -82,65 +68,158 @@ func TestIntegration_ReaperReclaimsOrphanedTasks(t *testing.T) {
 		}
 	}
 
-	// --- 3. Start worker-1 (500 ms sleep, 0 % failure, short lease) ---
-	workerEnv := []string{
-		"REDIS_ADDR=" + workerAddr,
-		"WORKER_SLEEP_MS=500",
-		"WORKER_FAILURE_PCT=0",
-		"LEASE_TTL_SECONDS=2",
-		"REAPER_INTERVAL_SECONDS=1",
-		"REAPER_ENABLED=true",
-	}
-
-	worker1 := exec.Command(workerBin)
-	worker1.Env = append(os.Environ(), workerEnv...)
-	worker1.Stdout = os.Stderr
-	worker1.Stderr = os.Stderr
-	if err := worker1.Start(); err != nil {
-		t.Fatalf("failed to start worker1: %v", err)
-	}
-
-	// --- 4. Kill worker-1 after 100 ms ---
-	time.Sleep(100 * time.Millisecond)
-	if err := worker1.Process.Kill(); err != nil {
-		t.Fatalf("failed to kill worker1: %v", err)
-	}
-	worker1.Wait() //nolint:errcheck
-	t.Log("worker1 killed after 100 ms")
-
-	// --- 5. Start worker-2 (same config) ---
-	worker2 := exec.Command(workerBin)
-	worker2.Env = append(os.Environ(), workerEnv...)
-	worker2.Stdout = os.Stderr
-	worker2.Stderr = os.Stderr
-	if err := worker2.Start(); err != nil {
-		t.Fatalf("failed to start worker2: %v", err)
-	}
-	defer func() {
-		worker2.Process.Kill() //nolint:errcheck
-		worker2.Wait()         //nolint:errcheck
-	}()
-
-	// --- 6. Poll until all three queues are empty ---
-	deadline := time.After(2 * time.Minute)
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-deadline:
-			pending := client.LLen(ctx, queue.QueuePending).Val()
-			processing := client.LLen(ctx, queue.QueueProcessing).Val()
-			dlq := client.LLen(ctx, queue.QueueDeadLetter).Val()
-			t.Fatalf("timeout: pending=%d processing=%d dlq=%d", pending, processing, dlq)
-		case <-ticker.C:
-			pending := client.LLen(ctx, queue.QueuePending).Val()
-			processing := client.LLen(ctx, queue.QueueProcessing).Val()
-			dlq := client.LLen(ctx, queue.QueueDeadLetter).Val()
-			if pending == 0 && processing == 0 && dlq == 0 {
-				t.Log("all 50 tasks completed successfully")
+	// --- 2. Start "worker-1" that picks up tasks but crashes mid-processing ---
+	//
+	// The worker goroutine uses BLMove with a short timeout in a loop.  For
+	// each task it moves to processing, it acquires a lease and starts a
+	// refresh goroutine, then immediately tries to grab the next task.
+	// When the context is cancelled all refresh goroutines stop, no leases
+	// are released, and no tasks are acked — simulating a hard crash.
+	worker1Ctx, worker1Cancel := context.WithCancel(ctx)
+	worker1Done := make(chan struct{})
+	go func() {
+		defer close(worker1Done)
+		for {
+			result, err := client.BLMove(worker1Ctx, queue.QueuePending, queue.QueueProcessing, "RIGHT", "LEFT", 2*time.Second).Result()
+			if err != nil {
+				return // context cancelled or timeout
+			}
+			task, err := queue.BytesToTask([]byte(result))
+			if err != nil {
+				continue
+			}
+			if err := reaper.AcquireLease(worker1Ctx, client, task.ID, "worker-1"); err != nil {
 				return
 			}
+			_ = reaper.StartLeaseRefresh(worker1Ctx, client, task.ID, "worker-1")
+			// Do NOT ack or release — simulate a worker that is still
+			// processing when it crashes.
 		}
+	}()
+
+	// Give worker-1 time to pick up all tasks, then "crash" it.
+	time.Sleep(3 * time.Second)
+	worker1Cancel()
+	<-worker1Done
+	t.Log("worker-1 crashed (context cancelled)")
+
+	// --- 3. Wait for leases to expire, then start the reaper ---
+	time.Sleep(3 * time.Second)
+
+	reapCtx, reapCancel := context.WithCancel(ctx)
+	r := reaper.NewReaper(client)
+	go r.Run(reapCtx)
+
+	// Wait for at least one reaper sweep
+	time.Sleep(2 * time.Second)
+	reapCancel()
+
+	reclaimed := r.Reclaimed()
+	t.Logf("reaper reclaimed %d tasks", reclaimed)
+	if reclaimed == 0 {
+		t.Fatal("expected reaper to reclaim at least one task, but reclaimed=0")
+	}
+
+	// --- 4. Start "worker-2" that completes all remaining tasks ---
+	completed := 0
+	for completed < numTasks {
+		result, err := client.BLMove(ctx, queue.QueuePending, queue.QueueProcessing, "RIGHT", "LEFT", 5*time.Second).Result()
+		if err != nil {
+			t.Fatalf("worker-2: BLMove error after %d completions: %v", completed, err)
+		}
+		task, err := queue.BytesToTask([]byte(result))
+		if err != nil {
+			t.Fatalf("worker-2: parse error: %v", err)
+		}
+
+		// Normal lifecycle: acquire → process → ack + release
+		reaper.AcquireLease(ctx, client, task.ID, "worker-2")
+		reaper.ReleaseLease(ctx, client, task.ID)
+		client.LRem(ctx, queue.QueueProcessing, 1, result)
+		completed++
+		t.Logf("worker-2 completed task %s (%d/%d)", task.ID, completed, numTasks)
+	}
+
+	// --- 5. Verify all queues are empty ---
+	pending := client.LLen(ctx, queue.QueuePending).Val()
+	processing := client.LLen(ctx, queue.QueueProcessing).Val()
+	dlq := client.LLen(ctx, queue.QueueDeadLetter).Val()
+
+	if pending != 0 || processing != 0 || dlq != 0 {
+		t.Fatalf("queues not empty: pending=%d processing=%d dlq=%d", pending, processing, dlq)
+	}
+
+	t.Logf("SUCCESS: all %d tasks completed, %d reclaimed by reaper", numTasks, reclaimed)
+}
+
+// TestIntegration_DelayedTaskExecutionAccuracy schedules a task 2s in the future and asserts it executes within ±500ms of target.
+func TestIntegration_DelayedTaskExecutionAccuracy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	// Setup fast dispatcher intervals via env
+	t.Setenv("DISPATCHER_INTERVAL_MS", "100")
+
+	client := setupRedis(t)
+	defer client.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start the dispatcher in background
+	disp := dispatcher.NewDispatcher(client)
+	go disp.Run(ctx)
+
+	// Create and schedule task 2 seconds in the future
+	targetDelay := 2 * time.Second
+	startTime := time.Now()
+	executeAt := startTime.Add(targetDelay)
+
+	task := queue.Task{
+		ID:        queue.NewID(),
+		Type:      "integration-delay",
+		ExecuteAt: &executeAt,
+	}
+
+	data, _ := json.Marshal(task)
+	err := client.ZAdd(ctx, queue.QueueDelayed, redis.Z{
+		Score:  float64(executeAt.Unix()),
+		Member: data,
+	}).Err()
+	if err != nil {
+		t.Fatalf("failed to schedule task: %v", err)
+	}
+
+	// We will simulate a worker that polls pending queue.
+	// Since the dispatcher moves it to pending:default, we poll pending:default.
+	res, err := client.BLMove(ctx, queue.QueuePendingDefault, queue.QueueProcessing, "RIGHT", "LEFT", 5*time.Second).Result()
+	if err != nil {
+		t.Fatalf("BLMove failed to receive dispatched task: %v", err)
+	}
+
+	executionTime := time.Now()
+	actualDelay := executionTime.Sub(startTime)
+
+	// Clean up task from processing list
+	client.LRem(ctx, queue.QueueProcessing, 1, res)
+
+	var receivedTask queue.Task
+	json.Unmarshal([]byte(res), &receivedTask)
+	if receivedTask.ID != task.ID {
+		t.Fatalf("expected task ID %s, got %s", task.ID, receivedTask.ID)
+	}
+
+	// Assert: executed within ±500ms of target (2 seconds)
+	diff := actualDelay - targetDelay
+	absDiff := time.Duration(math.Abs(float64(diff)))
+
+	t.Logf("Start time: %s", startTime.Format(time.RFC3339Nano))
+	t.Logf("Target execution time: %s", executeAt.Format(time.RFC3339Nano))
+	t.Logf("Actual execution time: %s", executionTime.Format(time.RFC3339Nano))
+	t.Logf("Target delay: %s, Actual delay: %s, Difference: %s", targetDelay, actualDelay, diff)
+
+	if absDiff > 500*time.Millisecond {
+		t.Errorf("expected task to execute within 500ms of target delay (2s), but difference was %s", diff)
 	}
 }

@@ -5,15 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
+	"go-queue/internal/dispatcher"
 	"go-queue/internal/metrics"
 	"go-queue/internal/queue"
 	"go-queue/internal/reaper"
+
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -23,11 +28,13 @@ func main() {
 	if addr == "" {
 		addr = "localhost:6379"
 	}
-	client := queue.NewClient(addr)
+	db := envInt("REDIS_DB", 0)
+	client := queue.NewClientWithDB(addr, db)
 	defer client.Close()
 
 	workerID := queue.NewID()
-	slog.Info("worker started", "worker_id", workerID, "redis", addr)
+	workerCount := envInt("WORKER_COUNT", 1)
+	slog.Info("worker started", "worker_id", workerID, "redis", addr, "concurrency", workerCount)
 
 	// Start metrics HTTP server
 	metricsAddr := os.Getenv("WORKER_METRICS_ADDR")
@@ -48,17 +55,91 @@ func main() {
 		go r.Run(ctx)
 	}
 
+	// Start dispatcher goroutine (gated by DISPATCHER_ENABLED, default true)
+	if dispatcher.IsDispatcherEnabled() {
+		d := dispatcher.NewDispatcher(client)
+		go d.Run(ctx)
+	}
+
 	// Configurable processing parameters
 	sleepMs := envInt("WORKER_SLEEP_MS", 1000)
 	failurePct := envInt("WORKER_FAILURE_PCT", 25)
 
+	// Launch concurrent worker goroutines
+	var wg sync.WaitGroup
+	for i := range workerCount {
+		wg.Add(1)
+		go func(_ int) {
+			defer wg.Done()
+			runWorkerLoop(ctx, client, workerID, sleepMs, failurePct)
+		}(i)
+	}
+	wg.Wait()
+}
+
+// pollTask attempts to retrieve a task from the queues in priority order:
+// 1. Non-blocking LMove on QueuePendingHigh
+// 2. Non-blocking LMove on QueuePendingDefault
+// 3. Blocking BLMove on QueuePendingLow with a 1-second timeout.
+func pollTask(ctx context.Context, client *redis.Client) (string, error) {
+	// 1. High priority
+	res, err := client.LMove(ctx, queue.QueuePendingHigh, queue.QueueProcessing, "RIGHT", "LEFT").Result()
+	if err == nil {
+		return res, nil
+	}
+	if err != redis.Nil {
+		return "", err
+	}
+
+	// 2. Default priority
+	res, err = client.LMove(ctx, queue.QueuePendingDefault, queue.QueueProcessing, "RIGHT", "LEFT").Result()
+	if err == nil {
+		return res, nil
+	}
+	if err != redis.Nil {
+		return "", err
+	}
+
+	// 3. Low priority (blocking 1s)
+	res, err = client.BLMove(ctx, queue.QueuePendingLow, queue.QueueProcessing, "RIGHT", "LEFT", 1*time.Second).Result()
+	if err == nil {
+		return res, nil
+	}
+	return "", err
+}
+
+// calculateBackoff calculates true exponential backoff with jitter capped at 60s.
+func calculateBackoff(attempt int) time.Duration {
+	baseDelay := 2.0 // base delay in seconds
+	delaySecs := baseDelay * math.Pow(2, float64(attempt))
+
+	// Jitter: ±20%
+	jitterRange := delaySecs * 0.2
+	jitter := (rand.Float64()*2 - 1) * jitterRange
+	finalDelaySecs := delaySecs + jitter
+
+	// Cap at 60 seconds
+	if finalDelaySecs > 60.0 {
+		finalDelaySecs = 60.0
+	}
+	if finalDelaySecs < 0.1 {
+		finalDelaySecs = 0.1
+	}
+
+	return time.Duration(finalDelaySecs * float64(time.Second))
+}
+
+// runWorkerLoop is the main task-processing loop for a single worker goroutine.
+func runWorkerLoop(ctx context.Context, client *redis.Client, workerID string, sleepMs, failurePct int) {
 	for {
-		// 1. ATOMIC MOVE: Pop from 'pending', push to 'processing'
-		result, err := client.BLMove(ctx, queue.QueuePending, queue.QueueProcessing, "RIGHT", "LEFT", 0).Result()
+		// 1. ATOMIC MOVE: Pop from priority queues, push to 'processing'
+		result, err := pollTask(ctx, client)
 
 		if err != nil {
-			slog.Error("error connecting to Redis", "err", err)
-			time.Sleep(3 * time.Second) // Retry delay
+			if err != redis.Nil {
+				slog.Error("error connecting to Redis", "err", err)
+				time.Sleep(3 * time.Second) // Retry delay
+			}
 			continue
 		}
 
@@ -96,14 +177,24 @@ func main() {
 			client.LRem(ctx, queue.QueueProcessing, 1, result)
 
 			if task.RetryCount < 3 {
-				// Case A: Retry
+				// Case A: Retry with exponential backoff and jitter
 				task.RetryCount++
-				slog.Info("retrying task", "task_id", task.ID, "attempt", task.RetryCount)
+				backoff := calculateBackoff(task.RetryCount)
+				executeAt := time.Now().Add(backoff)
+				task.ExecuteAt = &executeAt
+
+				slog.Info("retrying task with backoff", "task_id", task.ID, "attempt", task.RetryCount, "backoff", backoff)
 				metrics.TaskRetriesTotal.WithLabelValues(task.Type).Inc()
 
-				// Serialize and push back to Pending
+				// Serialize and push back to delayed queue
 				data, _ := json.Marshal(task)
-				client.RPush(ctx, queue.QueuePending, data)
+				err = client.ZAdd(ctx, queue.QueueDelayed, redis.Z{
+					Score:  float64(executeAt.Unix()),
+					Member: data,
+				}).Err()
+				if err != nil {
+					slog.Error("failed to schedule retry", "task_id", task.ID, "err", err)
+				}
 			} else {
 				// Case B: Dead Letter Queue
 				slog.Warn("task moved to DLQ", "task_id", task.ID)

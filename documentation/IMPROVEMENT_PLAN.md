@@ -27,7 +27,7 @@ flowchart TB
     end
 
     subgraph "Worker (Single Process)"
-        WL["Main Loop\n(BRPopLPush — deprecated)"]
+        WL["Main Loop\n(BLMove — atomic)"]
         RT["Retry Logic\n(in-process, ≤3 attempts)"]
     end
 
@@ -38,7 +38,7 @@ flowchart TB
 
     C1 -->|"POST JSON"| API
     API -->|"LPUSH"| P
-    P -->|"BRPopLPush\n(atomic move)"| WL
+    P -->|"BLMove\n(atomic move)"| WL
     WL -->|"success → LREM"| PR
     WL -->|"failure"| RT
     RT -->|"retry ≤ 3 → RPUSH"| P
@@ -185,7 +185,7 @@ flowchart TB
 | Area | Current | Target | Phase |
 |---|---|---|---|
 | **Crash Recovery** | None — orphaned tasks lost | Lease-based reaper reclaims within ≤60s | 1.1 |
-| **Queue Primitive** | `BRPopLPush` (deprecated) | `BLMOVE` | 1.2 |
+| **Queue Primitive** | `BRPopLPush` (deprecated) | `BLMOVE` | 1.2 | ~~DONE~~ |
 | **ID Generation** | `time.Now().UnixNano()` (collision risk) | ULID (lexicographic, unique) | 1.3 |
 | **Idempotency** | Undocumented | `SETNX` guard with 24h TTL | 1.4 |
 | **Scheduling** | Not supported | Sorted set + dispatcher goroutine | 2.1 |

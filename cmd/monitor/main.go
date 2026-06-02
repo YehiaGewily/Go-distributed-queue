@@ -32,7 +32,7 @@ func main() {
 	}
 
 	client := queue.NewClient(addr)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Background goroutine: update queue_depth gauges every 5 seconds
 	go func() {

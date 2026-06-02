@@ -24,7 +24,7 @@ func setupTestDB(t *testing.T) (*miniredis.Miniredis, *redis.Client) {
 
 func TestProducer_TaskRoute_PriorityValidation(t *testing.T) {
 	_, client := setupTestDB(t)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	mux := setupMux(client)
 	server := httptest.NewServer(mux)
@@ -106,7 +106,7 @@ func TestProducer_TaskRoute_PriorityValidation(t *testing.T) {
 
 func TestProducer_TaskRoute_ExecuteAt(t *testing.T) {
 	_, client := setupTestDB(t)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	mux := setupMux(client)
 	server := httptest.NewServer(mux)
@@ -147,7 +147,7 @@ func TestProducer_TaskRoute_ExecuteAt(t *testing.T) {
 
 func TestProducer_BatchTasks(t *testing.T) {
 	_, client := setupTestDB(t)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	mux := setupMux(client)
 	server := httptest.NewServer(mux)

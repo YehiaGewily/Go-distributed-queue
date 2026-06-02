@@ -30,7 +30,7 @@ func main() {
 	}
 	db := envInt("REDIS_DB", 0)
 	client := queue.NewClientWithDB(addr, db)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	workerID := queue.NewID()
 	workerCount := envInt("WORKER_COUNT", 1)

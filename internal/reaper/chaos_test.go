@@ -50,7 +50,7 @@ func TestChaos_WorkerKillAndReclaim(t *testing.T) {
 	}
 
 	client := setupChaosRedis(t)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 

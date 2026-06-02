@@ -23,7 +23,7 @@ func main() {
 
 	// 1. Initialize Global Redis Client
 	client := queue.NewClient(addr)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	slog.Info("producer API starting", "addr", ":8085", "redis", addr)
 

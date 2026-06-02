@@ -50,7 +50,7 @@ func TestIntegration_ReaperReclaimsOrphanedTasks(t *testing.T) {
 	t.Setenv("REAPER_INTERVAL_SECONDS", "1")
 
 	client := setupRedis(t)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 
@@ -162,7 +162,7 @@ func TestIntegration_DelayedTaskExecutionAccuracy(t *testing.T) {
 	t.Setenv("DISPATCHER_INTERVAL_MS", "100")
 
 	client := setupRedis(t)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -18,7 +18,7 @@ func setupTestDB(t *testing.T) (*miniredis.Miniredis, *redis.Client) {
 
 func TestBLMove_AtomicPendingToProcessing(t *testing.T) {
 	mr, client := setupTestDB(t)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 
@@ -58,7 +58,7 @@ func TestBLMove_AtomicPendingToProcessing(t *testing.T) {
 
 func TestBLMove_BlockingTimeout(t *testing.T) {
 	mr, client := setupTestDB(t)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 

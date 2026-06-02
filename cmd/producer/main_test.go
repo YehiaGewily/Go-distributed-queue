@@ -85,7 +85,7 @@ func TestProducer_TaskRoute_PriorityValidation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != tt.expectedStatus {
 				t.Errorf("expected status %d, got %d", tt.expectedStatus, resp.StatusCode)
@@ -125,7 +125,7 @@ func TestProducer_TaskRoute_ExecuteAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("expected 202 Accepted, got %d", resp.StatusCode)
@@ -178,7 +178,7 @@ func TestProducer_BatchTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("expected 202 Accepted, got %d", resp.StatusCode)

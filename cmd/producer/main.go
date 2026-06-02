@@ -110,10 +110,12 @@ func setupMux(client *redis.Client) *http.ServeMux {
 		// Response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted) // 202 Accepted
-		json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status":  "queued",
 			"task_id": t.ID,
-		})
+		}); err != nil {
+			slog.Error("failed to encode response", "err", err)
+		}
 	})
 
 	mux.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
@@ -194,11 +196,13 @@ func setupMux(client *redis.Client) *http.ServeMux {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted) // 202 Accepted
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":   "queued",
 			"count":    len(tasks),
 			"task_ids": taskIDs,
-		})
+		}); err != nil {
+			slog.Error("failed to encode response", "err", err)
+		}
 	})
 
 	return mux

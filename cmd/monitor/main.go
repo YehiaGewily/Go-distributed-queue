@@ -82,7 +82,9 @@ func main() {
 	// Serve the static HTML page
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(indexHTML))
+		if _, err := w.Write([]byte(indexHTML)); err != nil {
+			slog.Error("failed to write response", "err", err)
+		}
 	})
 
 	// JSON Stats Endpoint
@@ -126,14 +128,16 @@ func main() {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(StatsResponse{
+		if err := json.NewEncoder(w).Encode(StatsResponse{
 			PendingHigh:    pendingHigh,
 			PendingDefault: pendingDefault,
 			PendingLow:     pendingLow,
 			Processing:     processing,
 			DeadLetter:     deadLetter,
 			Delayed:        delayed,
-		})
+		}); err != nil {
+			slog.Error("failed to encode response", "err", err)
+		}
 	})
 
 	// Expose Prometheus metrics

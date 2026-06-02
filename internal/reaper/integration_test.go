@@ -171,6 +171,9 @@ func TestIntegration_DelayedTaskExecutionAccuracy(t *testing.T) {
 	disp := dispatcher.NewDispatcher(client)
 	go disp.Run(ctx)
 
+	// Align to next second boundary to avoid sub-second rounding errors with second-precision Unix timestamps
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+
 	// Create and schedule task 2 seconds in the future
 	targetDelay := 2 * time.Second
 	startTime := time.Now()

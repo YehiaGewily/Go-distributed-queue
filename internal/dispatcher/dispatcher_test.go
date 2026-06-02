@@ -21,7 +21,7 @@ func setupTestDB(t *testing.T) (*miniredis.Miniredis, *redis.Client) {
 
 func TestDispatcher_SweepDispatchesDueTasks(t *testing.T) {
 	_, client := setupTestDB(t)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	d := NewDispatcher(client)
@@ -61,7 +61,9 @@ func TestDispatcher_SweepDispatchesDueTasks(t *testing.T) {
 
 	got := client.LIndex(ctx, queue.QueuePendingDefault, 0).Val()
 	var gotTask queue.Task
-	json.Unmarshal([]byte(got), &gotTask)
+	if err := json.Unmarshal([]byte(got), &gotTask); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if gotTask.ID != "past-id" {
 		t.Errorf("expected task past-id to be dispatched, got %s", gotTask.ID)
 	}
@@ -75,7 +77,7 @@ func TestDispatcher_SweepDispatchesDueTasks(t *testing.T) {
 
 func TestDispatcher_SweepRespectsPriorities(t *testing.T) {
 	_, client := setupTestDB(t)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	d := NewDispatcher(client)

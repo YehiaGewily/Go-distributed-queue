@@ -1,0 +1,5 @@
+/bin
+/worker.exe
+/%TEMP%
+.DS_Store
+*.log

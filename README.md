@@ -1,168 +1,173 @@
 # Go Distributed Queue
 
-![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)
-![Redis](https://img.shields.io/badge/Redis-7.0+-DC382D?style=flat&logo=redis)
-![Docker](https://img.shields.io/badge/Docker-v24+-2496ED?style=flat&logo=docker)
-![REST API](https://img.shields.io/badge/API-REST-4CAF50?style=flat)  
+[![Build & Test Status](https://github.com/YehiaGewily/Go-distributed-queue/actions/workflows/ci.yml/badge.svg)](https://github.com/YehiaGewily/Go-distributed-queue/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat&logo=go)](https://golang.org)
+[![Docker Support](https://img.shields.io/badge/Docker-v24+-2496ED?style=flat&logo=docker)](https://www.docker.com)
+[![Redis Version](https://img.shields.io/badge/Redis-7.0+-DC382D?style=flat&logo=redis)](https://redis.io)
 
-**A high-throughput, fault-tolerant distributed task processing system implementing the Reliable Queue Pattern.**
+A production-grade, high-throughput, fault-tolerant distributed task queue implementing the **Reliable Queue Pattern**. The system guarantees **at-least-once delivery** through atomic state transitions and a lease-based crash recovery reaper, verified under concurrent worker failures by automated chaos testing. Features include multi-tier priority queues, delayed execution, batch ingestion, and native Prometheus instrumentation.
 
-Designed to handle concurrent workloads with zero data loss, ensuring robustness in distributed environments through atomic state transitions and graceful lifecycle management.
+---
 
 ## Architecture
 
-The system decouples task ingestion from processing using a persistent Redis layer, managed by a scalable pool of concurrent workers.
+The system decouples task ingestion from execution via Redis queues. A background dispatcher manages scheduled executions, while concurrent workers poll tasks sequentially in priority order.
 
-<p align="center">
-  <img src="documentation/architecture.svg" alt="System Architecture Diagram" width="900"/>
-</p>
-
-## Key Engineering Concepts
-
-### Reliable Queue Pattern (Atomic LMOVE)
-Implements the **Reliable Queue Pattern** to guarantee **at-least-once delivery** with reaper-based crash recovery.
-- Tasks are atomically moved from `tasks:pending` to `tasks:processing` using `BLMove`.
-- When a worker picks up a task, it sets a lease key (`task:lease:<id>`) with a configurable TTL. A per-task goroutine refreshes the lease while processing.
-- If a worker crashes, its lease expires. A background **reaper** goroutine detects orphaned tasks and moves them back to `tasks:pending` for re-processing.
-- **Max reclaim latency** ≈ `LEASE_TTL_SECONDS` + `REAPER_INTERVAL_SECONDS` (default ~35 s).
-- All reclaim steps are atomic via a Lua script, preventing concurrent reapers from double-reclaiming.
-
-### Fault Tolerance & Retry Logic
-- **Automatic Retries**: Failed tasks are retried up to 3 times.
-- **Dead Letter Queue (DLQ)**: Tasks that exceed the retry limit are moved to a `dead_letter` queue for manual inspection, preventing poison pills from clogging the system.
-- **Crash Recovery**: Lease-based reaper reclaims orphaned tasks within `LEASE_TTL_SECONDS + REAPER_INTERVAL_SECONDS`.
-
-### Real-Time Monitoring
-- **Live Dashboard**: A web-based dashboard provides real-time visibility into queue depths (Pending, Processing, Dead Letter).
-- **JSON API**: Exposes metrics via a simple JSON endpoint for external tools.
-
-### Task IDs
-- IDs are generated using **ULID** (`github.com/oklog/ulid/v2`), which is time-sortable and collision-free under concurrent load.
-
-### Concurrency & Parallelism
-Leverages Go's scheduler and efficient goroutines to maximize throughput.
-- **Worker Pools**: Spawns multiple concurrent processors managed via `sync.WaitGroup`.
-- **Non-blocking I/O**: Efficiently handles idle waiting on Redis connections.
-
-### Graceful Shutdowns
-Implements robust signal handling (`SIGINT`, `SIGTERM`) using `os/signal` and context cancellation to ensure all in-flight tasks complete execution before termination.
-
-## Quick Start
-
-### Prerequisites
-- Docker & Docker Compose
-- Go 1.23+
-
-### 1. Start the Infrastructure
-Initialize the Redis instance.
-```bash
-docker-compose up -d redis
+```mermaid
+flowchart TD
+    Client -->|POST /task or /tasks| Producer[Producer :8085]
+    Producer -->|ZADD| DelayedQueue[(tasks:delayed)]
+    Producer -->|LPUSH| PendingHigh[(tasks:pending:high)]
+    Producer -->|LPUSH| PendingDefault[(tasks:pending:default)]
+    Producer -->|LPUSH| PendingLow[(tasks:pending:low)]
+    
+    Dispatcher[Delayed Dispatcher] -->|ZRANGEBYSCORE + LPUSH| PendingHigh
+    Dispatcher -->|ZRANGEBYSCORE + LPUSH| PendingDefault
+    Dispatcher -->|ZRANGEBYSCORE + LPUSH| PendingLow
+    DelayedQueue -.->|Read & remove| Dispatcher
+    
+    Worker[Worker Pool] -->|LMOVE / BLMOVE| PendingHigh
+    Worker -->|LMOVE / BLMOVE| PendingDefault
+    Worker -->|LMOVE / BLMOVE| PendingLow
+    
+    PendingHigh -.->|Popped into| Processing[(tasks:processing)]
+    PendingDefault -.->|Popped into| Processing
+    PendingLow -.->|Popped into| Processing
+    
+    Worker -->|Ack: LREM| Processing
+    Worker -->|Fail: ZADD retry| DelayedQueue
+    Worker -->|Fail: LPUSH DLQ| DLQ[(tasks:dead_letter)]
+    
+    Reaper[Reaper] -->|Scan expired leases| Processing
+    Reaper -->|Reclaim: LREM + LPUSH| PendingHigh
+    Reaper -->|Reclaim: LREM + LPUSH| PendingDefault
+    Reaper -->|Reclaim: LREM + LPUSH| PendingLow
+    
+    Monitor[Monitor Dashboard] -->|LLEN / ZCARD| DelayedQueue
+    Monitor -->|LLEN| PendingHigh
+    Monitor -->|LLEN| PendingDefault
+    Monitor -->|LLEN| PendingLow
+    Monitor -->|LLEN| Processing
+    Monitor -->|LLEN| DLQ
 ```
 
-### 2. Start the Services
-Run each service in a separate terminal:
+---
 
-**Producer API (Port 8085)**
-```bash
-go run cmd/producer/main.go
-# Starts HTTP server on :8085
-```
+## Reliability
 
-**Monitor Dashboard (Port 8082)**
-```bash
-go run cmd/monitor/main.go
-# Dashboard available at http://localhost:8082
-```
+Workers lease tasks during execution by setting a key in Redis (`task:lease:<id>`) for `LEASE_TTL_SECONDS`. While the task is active, a per-task goroutine refreshes this lease every `LEASE_TTL_SECONDS / 3`. 
 
-**Worker Pool**
-```bash
-go run cmd/worker/main.go
-# Starts the worker node
-```
+If a worker process dies mid-flight (due to OOM, host crash, or SIGKILL), its lease key expires. A background **reaper** sweeps the `tasks:processing` queue, detecting orphaned tasks without leases and reclaiming them back into their original priority queues atomically via a Lua script.
 
-### 3. Dispatch Tasks
-You can send tasks manually or run the stress test script to simulate load.
+$$\text{Reclaim Latency}_{\text{max}} \approx \text{LEASE\_TTL\_SECONDS} + \text{REAPER\_INTERVAL\_SECONDS}$$
 
-**Using the Stress Test Script:**
-This script sends a burst of concurrent requests to the producer.
-```bash
-go run scripts/stress_load/main.go
-```
+With default configurations ($30\text{ s}$ lease + $5\text{ s}$ sweep), crashed worker tasks are safely recovered within $35\text{ seconds}$ with zero task loss.
 
-**Using cURL:**
-```bash
-curl -X POST http://localhost:8085/task \
-     -H "Content-Type: application/json" \
-     -d '{"type": "email-notification", "payload": "user@example.com"}'
-```
-
-**Response:**
-```json
-{
-  "status": "queued",
-  "task_id": "01JABCDEF0123456789ABCDEFGH"
-}
-```
-
-## API Endpoints
-
-### Producer (`:8085`)
-- `POST /task`: Enqueues a new task.
-    - Body: `{"type": "string", "payload": "any"}`
-    - Returns: `202 Accepted` with Task ID.
-- `GET /metrics`: Prometheus metrics endpoint.
-
-### Worker (`:8086`)
-- `GET /metrics`: Prometheus metrics endpoint.
-
-### Monitor (`:8082`)
-- `GET /`: HTML Dashboard.
-- `GET /stats`: JSON metrics (`pending`, `processing`, `dead_letter` counts).
-- `GET /metrics`: Prometheus metrics endpoint.
+---
 
 ## Configuration
 
-All configuration is driven by environment variables with sensible defaults:
+All configuration is driven by environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_ADDR` | `localhost:6379` | Redis server address |
-| `LEASE_TTL_SECONDS` | `30` | Lease TTL for in-flight tasks (seconds) |
-| `REAPER_ENABLED` | `true` | Enable the orphaned-task reaper |
-| `REAPER_INTERVAL_SECONDS` | `5` | Reaper sweep interval (seconds) |
-| `WORKER_SLEEP_MS` | `1000` | Simulated task processing time (ms) |
-| `WORKER_FAILURE_PCT` | `25` | Simulated failure rate (0-100%) |
-| `WORKER_METRICS_ADDR` | `:8086` | Worker Prometheus metrics listen address |
+| `REDIS_ADDR` | `localhost:6379` | Redis host and port address |
+| `REDIS_DB` | `0` | Redis database index |
+| `WORKER_COUNT` | `1` | Concurrency: number of worker goroutines per worker node |
+| `LEASE_TTL_SECONDS` | `30` | Task lease TTL (seconds) before crash recovery triggers |
+| `REAPER_ENABLED` | `true` | Runs the orphaned-task recovery sweep |
+| `REAPER_INTERVAL_SECONDS` | `5` | Latency between reaper sweeps (seconds) |
+| `DISPATCHER_ENABLED` | `true` | Runs the scheduled-tasks dispatcher |
+| `DISPATCHER_INTERVAL_SECONDS`| `1` | Interval between scheduled-task sweeps (seconds) |
+| `DISPATCHER_INTERVAL_MS` | `0` | Sub-second dispatcher override (milliseconds, test use only) |
+| `WORKER_SLEEP_MS` | `1000` | Mock processing delay per task (milliseconds) |
+| `WORKER_FAILURE_PCT` | `25` | Mock task processing failure rate (percentage: 0-100) |
+| `WORKER_METRICS_ADDR` | `:8086` | Listen port for worker Prometheus metrics |
 
-## Metrics
+---
 
-Each binary exposes a `/metrics` endpoint compatible with Prometheus. The monitor additionally updates `queue_depth` gauges on a 5 s ticker.
+## API & Metrics
+
+Each binary exposes a `/metrics` endpoint compatible with Prometheus:
+- **Producer**: `http://localhost:8085/metrics`
+- **Worker**: `http://localhost:8086/metrics`
+- **Monitor**: `http://localhost:8082/metrics`
+
+### Prom Metrics Exposed
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `queue_depth` | Gauge | `queue` (pending, processing, dlq, delayed) | Number of tasks in each queue |
-| `task_duration_seconds` | Histogram | `type`, `status` | Time to process a task |
-| `task_enqueue_total` | Counter | `type` | Total tasks enqueued |
-| `task_retries_total` | Counter | `type` | Total task retries |
-| `task_reclaimed_total` | Counter | — | Total orphaned tasks reclaimed by the reaper |
+| `queue_depth` | Gauge | `queue` (`pending_high`, `pending_default`, `pending_low`, `delayed`, `processing`, `dlq`) | Current depth of each state queue |
+| `task_duration_seconds` | Histogram | `type`, `status` (`success`, `failure`) | Duration of task execution |
+| `task_enqueue_total` | Counter | `type` | Total count of ingested tasks |
+| `task_retries_total` | Counter | `type` | Total count of retried tasks |
+| `task_reclaimed_total` | Counter | — | Total count of recovered crashed tasks |
 
-A pre-built Grafana dashboard is available at `deploy/grafana/queue.json`.
+A pre-configured Grafana dashboard template is available at `deploy/grafana/queue.json`.
 
-## Architecture Diagram
+---
 
-```mermaid
-flowchart LR
-    C[Client] -->|POST /task| P[Producer :8085]
-    P -->|LPUSH| RP[(tasks:pending)]
-    W[Worker] -->|BLMOVE pop| RP
-    W -->|push| PR[(tasks:processing)]
-    W -->|LREM ack| PR
-    W -->|fail: RPUSH retry| RP
-    W -->|fail: LPUSH dlq| DLQ[(tasks:dead_letter)]
-    R[Reaper] -->|scan| PR
-    R -->|reclaim| RP
-    M[Monitor :8082] -->|LLEN| RP
-    M -->|LLEN| PR
-    M -->|LLEN| DLQ
+## Quick Start
+
+### 1. Start the Stack
+Boot up the complete Go Distributed Queue stack (Redis, Producer API, 5-Worker Pool, and Monitor Dashboard):
+```bash
+docker compose up -d --build
 ```
 
+### 2. Monitor Metrics
+- Monitor Dashboard (HTML): `http://localhost:8082`
+- Monitor Dashboard (JSON): `http://localhost:8082/stats`
+
+### 3. Enqueue Tasks
+
+**Single Task (with priority and execute_at scheduling):**
+```bash
+curl -X POST http://localhost:8085/task \
+     -H "Content-Type: application/json" \
+     -d '{
+       "type": "email",
+       "payload": "user@example.com",
+       "priority": "high",
+       "execute_at": "2026-06-03T12:00:00Z"
+     }'
+```
+
+**Batch Tasks (pipelined high-throughput):**
+```bash
+curl -X POST http://localhost:8085/tasks \
+     -H "Content-Type: application/json" \
+     -d '[
+       {"type": "job", "payload": "1", "priority": "high"},
+       {"type": "job", "payload": "2", "priority": "low"},
+       {"type": "job", "payload": "3"}
+     ]'
+```
+
+---
+
+## Testing
+
+Run tests locally with a running Redis instance or using mock miniredis:
+
+```bash
+# 1. Run Unit Tests (mocked via miniredis)
+go test ./... -count=1
+# Proves: logical correctness of client operations, dispatcher priority routing, and parser helpers.
+
+# 2. Run Integration Tests (requires docker-compose up redis)
+go test -tags=integration ./... -count=1 -timeout 60s
+# Proves: end-to-end task flows, actual recovery of crashed workers, and execution scheduling accuracy.
+
+# 3. Run Chaos Tests (requires docker-compose up redis)
+go test -tags=chaos ./internal/reaper/... -count=1 -timeout 120s
+# Proves: zero task loss and zero duplicates under simulated worker crashes and restarts.
+```
+
+---
+
+## Future Improvements
+
+- **Idempotency Keys**: Implement a `SETNX` guard on the worker side (with a 24-hour TTL) to prevent duplicate execution of non-idempotent tasks.
+- **Authentication**: Secure the ingestion endpoints (`/task` and `/tasks`) using Bearer Token middleware.
+- **Dynamic Scaling**: Implement horizontal worker scaling based on `queue_depth` thresholds.

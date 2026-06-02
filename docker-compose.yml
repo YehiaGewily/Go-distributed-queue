@@ -1,4 +1,5 @@
 version: '3.8'
+
 services:
   redis:
     image: redis:alpine
@@ -11,27 +12,39 @@ services:
       retries: 5
 
   producer:
-    image: golang:1.23-alpine
-    working_dir: /app
-    volumes:
-      - .:/app
+    build:
+      context: .
+      dockerfile: build/producer.Dockerfile
+    ports:
+      - "8085:8085"
     environment:
       - REDIS_ADDR=redis:6379
-    ports:
-      - "8080:8080"
-    command: go run cmd/producer/main.go
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: build/worker.Dockerfile
+    ports:
+      - "8086:8086"
+    environment:
+      - REDIS_ADDR=redis:6379
+      - WORKER_COUNT=5
+      - WORKER_METRICS_ADDR=:8086
+    depends_on:
+      redis:
+        condition: service_healthy
 
   monitor:
-    image: golang:1.23-alpine
-    working_dir: /app
-    volumes:
-      - .:/app
+    build:
+      context: .
+      dockerfile: build/monitor.Dockerfile
+    ports:
+      - "8082:8082"
     environment:
       - REDIS_ADDR=redis:6379
-    ports:
-      - "8081:8081"
-    command: go run cmd/monitor/main.go
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy

@@ -3,6 +3,8 @@ package queue
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/oklog/ulid/v2"
 )
 
 // Task represents the work to be done.
@@ -12,6 +14,11 @@ type Task struct {
 	Payload    string    `json:"payload"`
 	RetryCount int       `json:"retry_count"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+// NewID generates a unique, time-sortable task ID using ULID.
+func NewID() string {
+	return ulid.Make().String()
 }
 
 // Helper to deserialize

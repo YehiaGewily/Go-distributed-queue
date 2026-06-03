@@ -59,9 +59,11 @@ Workers lease tasks during execution by setting a key in Redis (`task:lease:<id>
 
 If a worker process dies mid-flight (due to OOM, host crash, or SIGKILL), its lease key expires. A background **reaper** sweeps the `tasks:processing` queue, detecting orphaned tasks without leases and reclaiming them back into their original priority queues atomically via a Lua script.
 
-$$\text{Reclaim Latency}_{\text{max}} \approx \text{LEASE\_TTL\_SECONDS} + \text{REAPER\_INTERVAL\_SECONDS}$$
+```math
+\text{Reclaim Latency}_{\max} \approx \mathtt{LEASE\_TTL\_SECONDS} + \mathtt{REAPER\_INTERVAL\_SECONDS}
+```
 
-With default configurations ($30\text{ s}$ lease + $5\text{ s}$ sweep), crashed worker tasks are safely recovered within $35\text{ seconds}$ with zero task loss.
+With default configurations (30 s lease + 5 s sweep), crashed worker tasks are safely recovered within 35 seconds with zero task loss.
 
 ### Idempotency
 

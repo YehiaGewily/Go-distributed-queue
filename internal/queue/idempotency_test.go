@@ -9,7 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func runWorkerIdempotentLogic(ctx context.Context, client *redis.Client, task Task, ttlSeconds int, handler func() error) (bool, error) {
+func runWorkerIdempotentLogic(t *testing.T, ctx context.Context, client *redis.Client, task Task, ttlSeconds int, handler func() error) (bool, error) {
 	if task.IdempotencyKey != "" {
 		claimTTL := 5 * time.Minute
 		claimed, err := client.SetNX(ctx, "task:done:"+task.IdempotencyKey, "in_flight", claimTTL).Result()
@@ -31,7 +31,7 @@ func runWorkerIdempotentLogic(ctx context.Context, client *redis.Client, task Ta
 
 	if task.IdempotencyKey != "" {
 		if err := client.Set(ctx, "task:done:"+task.IdempotencyKey, "done", time.Duration(ttlSeconds)*time.Second).Err(); err != nil {
-			// log
+			t.Fatalf("set done marker: %v", err)
 		}
 	}
 	return true, nil
@@ -60,7 +60,7 @@ func TestIdempotency_DuplicateKeySkipped(t *testing.T) {
 	}
 
 	// First execution should succeed and run handler
-	executed1, err := runWorkerIdempotentLogic(ctx, client, task1, 86400, handler)
+	executed1, err := runWorkerIdempotentLogic(t, ctx, client, task1, 86400, handler)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestIdempotency_DuplicateKeySkipped(t *testing.T) {
 	}
 
 	// Second execution with same key should be skipped
-	executed2, err := runWorkerIdempotentLogic(ctx, client, task2, 86400, handler)
+	executed2, err := runWorkerIdempotentLogic(t, ctx, client, task2, 86400, handler)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestIdempotency_NoKeyAlwaysRuns(t *testing.T) {
 		return nil
 	}
 
-	executed1, err := runWorkerIdempotentLogic(ctx, client, task1, 86400, handler)
+	executed1, err := runWorkerIdempotentLogic(t, ctx, client, task1, 86400, handler)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestIdempotency_NoKeyAlwaysRuns(t *testing.T) {
 		t.Fatal("expected task1 to run")
 	}
 
-	executed2, err := runWorkerIdempotentLogic(ctx, client, task2, 86400, handler)
+	executed2, err := runWorkerIdempotentLogic(t, ctx, client, task2, 86400, handler)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestIdempotency_FailureAllowsRetry(t *testing.T) {
 	}
 
 	// First execution fails
-	executed1, err := runWorkerIdempotentLogic(ctx, client, task, 86400, handler)
+	executed1, err := runWorkerIdempotentLogic(t, ctx, client, task, 86400, handler)
 	if err == nil {
 		t.Fatal("expected error from first execution")
 	}
@@ -157,7 +157,7 @@ func TestIdempotency_FailureAllowsRetry(t *testing.T) {
 	}
 
 	// Second execution should succeed because failure deleted the claim
-	executed2, err := runWorkerIdempotentLogic(ctx, client, task, 86400, handler)
+	executed2, err := runWorkerIdempotentLogic(t, ctx, client, task, 86400, handler)
 	if err != nil {
 		t.Fatalf("unexpected error on second run: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestIdempotency_DoneKeyHasLongTTL(t *testing.T) {
 	}
 
 	ttlSeconds := 86400
-	executed, err := runWorkerIdempotentLogic(ctx, client, task, ttlSeconds, handler)
+	executed, err := runWorkerIdempotentLogic(t, ctx, client, task, ttlSeconds, handler)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

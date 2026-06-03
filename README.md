@@ -63,6 +63,18 @@ $$\text{Reclaim Latency}_{\text{max}} \approx \text{LEASE\_TTL\_SECONDS} + \text
 
 With default configurations ($30\text{ s}$ lease + $5\text{ s}$ sweep), crashed worker tasks are safely recovered within $35\text{ seconds}$ with zero task loss.
 
+### Idempotency
+
+Producers can opt into deduplication for non-idempotent task handlers by attaching an `idempotency_key` field to the task payload during enqueueing. Workers skip execution if a task with the same key has already been executed within the configured time window.
+
+* **How to use**: Add `"idempotency_key": "some-unique-string"` when enqueueing a task.
+* **Guarantee**: At most one successful execution per key within the TTL window.
+* **Config**: The `IDEMPOTENCY_KEY_TTL_SECONDS` env var controls how long keys are cached (default `86400` = 24h).
+* **Pattern**: A **claim-then-confirm** pattern is used:
+  1. **Claim**: On start of processing, the worker sets `task:done:<idempotency_key>` to `"in_flight"` with a short `5-minute` TTL (lease window). If the key already exists, the task is skipped and marked as duplicate.
+  2. **Confirm**: Upon successful execution, the key's value is set to `"done"` and its TTL is extended to `IDEMPOTENCY_KEY_TTL_SECONDS`.
+  3. **Release**: If execution fails, the worker deletes the key so that subsequent retries can run successfully.
+
 ---
 
 ## Configuration
@@ -168,6 +180,5 @@ go test -tags=chaos ./internal/reaper/... -count=1 -timeout 120s
 
 ## Future Improvements
 
-- **Idempotency Keys**: Implement a `SETNX` guard on the worker side (with a 24-hour TTL) to prevent duplicate execution of non-idempotent tasks.
 - **Authentication**: Secure the ingestion endpoints (`/task` and `/tasks`) using Bearer Token middleware.
 - **Dynamic Scaling**: Implement horizontal worker scaling based on `queue_depth` thresholds.

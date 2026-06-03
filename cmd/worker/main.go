@@ -131,6 +131,7 @@ func calculateBackoff(attempt int) time.Duration {
 
 // runWorkerLoop is the main task-processing loop for a single worker goroutine.
 func runWorkerLoop(ctx context.Context, client *redis.Client, workerID string, sleepMs, failurePct int) {
+	ttlSeconds := envInt("IDEMPOTENCY_KEY_TTL_SECONDS", 86400)
 	for {
 		// 1. ATOMIC MOVE: Pop from priority queues, push to 'processing'
 		result, err := pollTask(ctx, client)
@@ -157,21 +158,43 @@ func runWorkerLoop(ctx context.Context, client *redis.Client, workerID string, s
 		}
 		cancelRefresh := reaper.StartLeaseRefresh(ctx, client, task.ID, workerID)
 
-		// 3. Process the task with simulated failure
+		// 3. Check Idempotency if key is provided
+		if task.IdempotencyKey != "" {
+			claimTTL := 5 * time.Minute
+			claimed, err := client.SetNX(ctx, "task:done:"+task.IdempotencyKey, "in_flight", claimTTL).Result()
+			if err != nil {
+				slog.Error("failed to claim idempotency key", "key", task.IdempotencyKey, "err", err)
+			} else if !claimed {
+				slog.Info("task skipped: idempotency key already processed", "key", task.IdempotencyKey, "task_id", task.ID)
+				metrics.TaskIdempotentSkipTotal.WithLabelValues(task.Type).Inc()
+				cancelRefresh()
+				if delErr := reaper.ReleaseLease(ctx, client, task.ID); delErr != nil {
+					slog.Error("failed to release lease on skipped task", "task_id", task.ID, "err", delErr)
+				}
+				client.LRem(ctx, queue.QueueProcessing, 1, result)
+				continue
+			}
+		}
+
+		// 4. Process the task with simulated failure
 		start := time.Now()
 		err = processTask(task, sleepMs, failurePct)
 		duration := time.Since(start).Seconds()
 
-		// 4. Stop lease refresh and release lease
+		// 5. Stop lease refresh and release lease
 		cancelRefresh()
 		if delErr := reaper.ReleaseLease(ctx, client, task.ID); delErr != nil {
 			slog.Error("failed to release lease", "task_id", task.ID, "err", delErr)
 		}
 
-		// 5. Handle Result
+		// 6. Handle Result
 		if err != nil {
 			slog.Warn("task failed", "task_id", task.ID, "err", err)
 			metrics.TaskDuration.WithLabelValues(task.Type, "failure").Observe(duration)
+
+			if task.IdempotencyKey != "" {
+				_ = client.Del(ctx, "task:done:"+task.IdempotencyKey).Err()
+			}
 
 			// Remove from processing queue regardless of next step (we re-add it if needed)
 			client.LRem(ctx, queue.QueueProcessing, 1, result)
@@ -207,6 +230,11 @@ func runWorkerLoop(ctx context.Context, client *redis.Client, workerID string, s
 			// Success
 			slog.Info("task done", "task_id", task.ID)
 			metrics.TaskDuration.WithLabelValues(task.Type, "success").Observe(duration)
+			if task.IdempotencyKey != "" {
+				if err := client.Set(ctx, "task:done:"+task.IdempotencyKey, "done", time.Duration(ttlSeconds)*time.Second).Err(); err != nil {
+					slog.Error("failed to mark idempotency key as done", "key", task.IdempotencyKey, "err", err)
+				}
+			}
 			client.LRem(ctx, queue.QueueProcessing, 1, result)
 		}
 	}

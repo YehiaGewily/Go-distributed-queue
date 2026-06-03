@@ -39,6 +39,15 @@ var TaskReclaimedTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "Total number of orphaned tasks reclaimed by the reaper",
 })
 
+// TaskIdempotentSkipTotal counts the number of tasks skipped due to idempotency key collision.
+var TaskIdempotentSkipTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "task_idempotent_skip_total",
+		Help: "Total number of tasks skipped due to idempotency key collision",
+	},
+	[]string{"type"},
+)
+
 // Handler returns an http.Handler that serves the Prometheus metrics endpoint.
 func Handler() http.Handler {
 	return promhttp.Handler()

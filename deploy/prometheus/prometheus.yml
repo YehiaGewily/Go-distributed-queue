@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "producer"
+    static_configs:
+      - targets: ["producer:8085"]
+
+  - job_name: "worker"
+    static_configs:
+      - targets: ["worker:8086"]
+
+  - job_name: "monitor"
+    static_configs:
+      - targets: ["monitor:8082"]
